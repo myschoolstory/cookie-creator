@@ -125,23 +125,16 @@ class CookieCreator:
         if format_type.lower() == "json":
             export_file = self.cookie_file.replace('.txt', '_ytdlp.json')
             cookies_dict = {}
-            
             for cookie in self.session.cookies:
                 domain = cookie.domain
                 if domain not in cookies_dict:
                     cookies_dict[domain] = {}
                 cookies_dict[domain][cookie.name] = cookie.value
-            
             with open(export_file, 'w') as f:
                 json.dump(cookies_dict, f, indent=2)
-                
         else:  # netscape format (default)
             export_file = self.cookie_file.replace('.txt', '_ytdlp.txt')
-            # The save method already saves in Netscape format
-            self.cookie_jar = MozillaCookieJar(export_file)
-            self.cookie_jar.update(self.session.cookies)
-            self.cookie_jar.save(ignore_discard=True, ignore_expires=True)
-        
+            self.cookie_jar.save(export_file, ignore_discard=True, ignore_expires=True)
         return export_file
 
 def interactive_mode():
