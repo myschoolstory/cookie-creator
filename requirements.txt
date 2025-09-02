@@ -1,0 +1,12 @@
+# Core dependencies
+requests
+
+# Optional dependencies for yt-dlp integration
+# Install with: pip install -r requirements.txt
+yt-dlp
+
+# Development dependencies (optional)
+# pytest
+# pytest-cov
+# black
+# flake8
