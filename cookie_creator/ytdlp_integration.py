@@ -7,7 +7,7 @@ import os
 import sys
 import json
 import tempfile
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union, List
 from urllib.parse import urlparse
 
 # Try to import yt-dlp components if available
@@ -21,17 +21,26 @@ except ImportError:
 
 from .cookie_creator import CookieCreator
 
+# Try to import credential management components
+try:
+    from .credential_manager import CredentialManager, CredentialManagerError
+    from .login_handlers import get_login_handler, list_supported_sites, LoginError
+    CREDENTIALS_AVAILABLE = True
+except ImportError:
+    CREDENTIALS_AVAILABLE = False
+
 class YtDlpCookieIntegration:
     """Integration class for yt-dlp cookie functionality."""
     
-    def __init__(self, cookie_file: str = None):
+    def __init__(self, cookie_file: str = None, enable_credentials: bool = True):
         """
         Initialize the integration.
         
         Args:
             cookie_file: Path to cookie file
+            enable_credentials: Whether to enable credential management
         """
-        self.cookie_creator = CookieCreator(cookie_file)
+        self.cookie_creator = CookieCreator(cookie_file, enable_credentials)
         self.temp_files = []
         
     def __del__(self):
@@ -43,28 +52,52 @@ class YtDlpCookieIntegration:
             except:
                 pass
     
-    def prepare_cookies_for_url(self, url: str, visit_first: bool = True) -> str:
+    def prepare_cookies_for_url(self, url: str, visit_first: bool = True, 
+                              use_credentials: bool = False, site_key: str = None,
+                              username: str = None, password: str = None) -> str:
         """
         Prepare cookies for a specific URL by visiting it first if needed.
         
         Args:
             url: Target URL for yt-dlp
             visit_first: Whether to visit the URL first to collect cookies
+            use_credentials: Boolean flag to enable credential-based authentication
+            site_key: Specific site identifier for credential lookup
+            username: Optional explicit username for authentication
+            password: Optional explicit password for authentication
             
         Returns:
             Path to cookie file compatible with yt-dlp
         """
         if visit_first:
-            success, message = self.cookie_creator.visit_website(url)
-            if not success:
-                print(f"Warning: Could not visit {url}: {message}")
+            if use_credentials and CREDENTIALS_AVAILABLE:
+                # Attempt authentication before visiting the URL
+                print(f"Attempting authenticated visit to {url}...")
+                success, message = self.cookie_creator.visit_website_with_login(
+                    url, site_key, username, password
+                )
+                if success:
+                    print(f"Authentication successful: {message}")
+                else:
+                    print(f"Authentication failed: {message}")
+                    print("Falling back to regular cookie collection...")
+                    success, message = self.cookie_creator.visit_website(url)
+                    if not success:
+                        print(f"Warning: Could not visit {url}: {message}")
+            else:
+                # Regular visit without authentication
+                success, message = self.cookie_creator.visit_website(url)
+                if not success:
+                    print(f"Warning: Could not visit {url}: {message}")
         
         # Export cookies in Netscape format for yt-dlp
         cookie_file = self.cookie_creator.export_cookies_for_ytdlp("netscape")
         return cookie_file
     
     def download_with_cookies(self, url: str, output_path: str = None, 
-                            visit_first: bool = True, **ytdlp_opts) -> bool:
+                            visit_first: bool = True, use_credentials: bool = False,
+                            site_key: str = None, username: str = None, 
+                            password: str = None, **ytdlp_opts) -> bool:
         """
         Download content using yt-dlp with collected cookies.
         
@@ -72,6 +105,10 @@ class YtDlpCookieIntegration:
             url: URL to download
             output_path: Output directory/filename pattern
             visit_first: Whether to visit URL first for cookies
+            use_credentials: Boolean flag to enable credential-based authentication
+            site_key: Specific site identifier for credential lookup
+            username: Optional explicit username for authentication
+            password: Optional explicit password for authentication
             **ytdlp_opts: Additional yt-dlp options
             
         Returns:
@@ -80,8 +117,10 @@ class YtDlpCookieIntegration:
         if not YTDLP_AVAILABLE:
             raise ImportError("yt-dlp is not installed. Install with: pip install yt-dlp")
         
-        # Prepare cookies
-        cookie_file = self.prepare_cookies_for_url(url, visit_first)
+        # Prepare cookies with credential support
+        cookie_file = self.prepare_cookies_for_url(
+            url, visit_first, use_credentials, site_key, username, password
+        )
         
         # Set up yt-dlp options
         ydl_opts = {
@@ -100,20 +139,52 @@ class YtDlpCookieIntegration:
             print(f"Download failed: {e}")
             return False
     
-    def create_ytdlp_config(self, urls: list, config_path: str = "ytdlp_config.conf") -> str:
+    def create_ytdlp_config(self, urls: Union[List[str], List[Dict[str, Any]]], 
+                           config_path: str = "ytdlp_config.conf") -> str:
         """
         Create a yt-dlp configuration file with cookie settings.
         
         Args:
-            urls: List of URLs to prepare cookies for
+            urls: List of URLs to prepare cookies for, or list of dictionaries
+                 containing URL and credential information. Each dict can contain:
+                 - 'url': The URL to visit
+                 - 'use_credentials': Whether to use credentials
+                 - 'site_key': Site identifier for credentials
+                 - 'username': Optional username
+                 - 'password': Optional password
             config_path: Path for the config file
             
         Returns:
             Path to the created config file
         """
-        # Visit all URLs to collect cookies
-        for url in urls:
-            self.cookie_creator.visit_website(url)
+        # Visit all URLs to collect cookies, with credential support
+        for url_info in urls:
+            if isinstance(url_info, str):
+                # Simple URL string
+                self.cookie_creator.visit_website(url_info)
+            elif isinstance(url_info, dict):
+                # Dictionary with URL and credential info
+                url = url_info.get('url')
+                if not url:
+                    continue
+                
+                use_credentials = url_info.get('use_credentials', False)
+                site_key = url_info.get('site_key')
+                username = url_info.get('username')
+                password = url_info.get('password')
+                
+                if use_credentials and CREDENTIALS_AVAILABLE:
+                    success, message = self.cookie_creator.visit_website_with_login(
+                        url, site_key, username, password
+                    )
+                    if not success:
+                        print(f"Authentication failed for {url}: {message}")
+                        print("Falling back to regular visit...")
+                        self.cookie_creator.visit_website(url)
+                else:
+                    self.cookie_creator.visit_website(url)
+            else:
+                print(f"Warning: Invalid URL info format: {url_info}")
         
         # Export cookies
         cookie_file = self.cookie_creator.export_cookies_for_ytdlp("netscape")
@@ -178,7 +249,9 @@ class CookieExtractor:
 
 # Convenience functions for easy integration
 def quick_download_with_cookies(url: str, output_path: str = None, 
-                               visit_first: bool = True) -> bool:
+                               visit_first: bool = True, use_credentials: bool = False,
+                               site_key: str = None, username: str = None, 
+                               password: str = None) -> bool:
     """
     Quick function to download with automatic cookie handling.
     
@@ -186,19 +259,32 @@ def quick_download_with_cookies(url: str, output_path: str = None,
         url: URL to download
         output_path: Output path
         visit_first: Visit URL first for cookies
+        use_credentials: Enable credential-based authentication
+        site_key: Site identifier for credential lookup
+        username: Optional explicit username for authentication
+        password: Optional explicit password for authentication
         
     Returns:
         Success status
     """
     integration = YtDlpCookieIntegration()
-    return integration.download_with_cookies(url, output_path, visit_first)
+    return integration.download_with_cookies(
+        url, output_path, visit_first, use_credentials, site_key, username, password
+    )
 
-def prepare_cookies_for_ytdlp(urls: list, cookie_file: str = "cookies_for_ytdlp.txt") -> str:
+def prepare_cookies_for_ytdlp(urls: Union[List[str], List[Dict[str, Any]]], 
+                             cookie_file: str = "cookies_for_ytdlp.txt") -> str:
     """
     Visit multiple URLs and prepare a cookie file for yt-dlp.
     
     Args:
-        urls: List of URLs to visit
+        urls: List of URLs to visit, or list of dictionaries containing URL
+             and credential information. Each dict can contain:
+             - 'url': The URL to visit
+             - 'use_credentials': Whether to use credentials
+             - 'site_key': Site identifier for credentials
+             - 'username': Optional username
+             - 'password': Optional password
         cookie_file: Output cookie file path
         
     Returns:
@@ -206,7 +292,32 @@ def prepare_cookies_for_ytdlp(urls: list, cookie_file: str = "cookies_for_ytdlp.
     """
     integration = YtDlpCookieIntegration(cookie_file)
     
-    for url in urls:
-        integration.cookie_creator.visit_website(url)
+    for url_info in urls:
+        if isinstance(url_info, str):
+            # Simple URL string
+            integration.cookie_creator.visit_website(url_info)
+        elif isinstance(url_info, dict):
+            # Dictionary with URL and credential info
+            url = url_info.get('url')
+            if not url:
+                continue
+            
+            use_credentials = url_info.get('use_credentials', False)
+            site_key = url_info.get('site_key')
+            username = url_info.get('username')
+            password = url_info.get('password')
+            
+            if use_credentials and CREDENTIALS_AVAILABLE:
+                success, message = integration.cookie_creator.visit_website_with_login(
+                    url, site_key, username, password
+                )
+                if not success:
+                    print(f"Authentication failed for {url}: {message}")
+                    print("Falling back to regular visit...")
+                    integration.cookie_creator.visit_website(url)
+            else:
+                integration.cookie_creator.visit_website(url)
+        else:
+            print(f"Warning: Invalid URL info format: {url_info}")
     
     return integration.cookie_creator.export_cookies_for_ytdlp("netscape")

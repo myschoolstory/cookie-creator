@@ -5,6 +5,11 @@ requests
 # Install with: pip install -r requirements.txt
 yt-dlp
 
+# Optional dependencies for credential management
+# Install with: pip install cookie-creator[credentials]
+keyring>=23.0.0
+cryptography>=3.0.0
+
 # Development dependencies (optional)
 # pytest
 # pytest-cov

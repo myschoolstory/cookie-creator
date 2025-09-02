@@ -8,7 +8,7 @@ setup(
     version="1.0.0",
     author="Alex Scott & the BrowserVM Project",
     author_email="",
-    description="Interactive cookie creator utility with yt-dlp integration",
+    description="Interactive cookie creator utility with yt-dlp integration and credential management",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/myschoolstory/cookie-creator",
@@ -32,6 +32,15 @@ setup(
     ],
     extras_require={
         "ytdlp": ["yt-dlp>=2023.1.6"],
+        "credentials": [
+            "keyring>=23.0.0",
+            "cryptography>=3.0.0",
+        ],
+        "full": [
+            "yt-dlp>=2023.1.6",
+            "keyring>=23.0.0",
+            "cryptography>=3.0.0",
+        ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov",
